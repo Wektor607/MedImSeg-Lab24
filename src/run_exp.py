@@ -68,7 +68,7 @@ if __name__ == '__main__':
     unet_config    = OmegaConf.load('../../MedImSeg-Lab24/configs/monai_unet.yaml')
     trainer_config = OmegaConf.load('../../MedImSeg-Lab24/configs/unet_trainer.yaml')
 
-    for i in [1, 10, 50, 100, 300, 500, 700, 1000]:
+    for i in [50, 100, 300, 500, 700, 1000]:
         # init datamodule
         datamodule = MNMv2DataModule(
             data_dir=mnmv2_config.data_dir,
@@ -223,8 +223,8 @@ if __name__ == '__main__':
         combined_targets = torch.cat([datamodule.mnm_train.target, selected_targets], dim=0)
 
         combined_data = MNMv2Subset(
-            input=selected_inputs,#combined_inputs,
-            target=selected_targets,#combined_targets,
+            input=combined_inputs,
+            target=combined_targets,
         )
         
         datamodule.mnm_train = combined_data
