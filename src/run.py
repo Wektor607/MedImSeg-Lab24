@@ -86,11 +86,11 @@ if __name__ == '__main__':
                         help="Stride for AvgPool2D in CLUE embedding extraction.")
     parser.add_argument('--target_size', type=int, default=1024, 
                         help="Target size (spatial area) for pooling in CLUE embedding extraction.")
-    parser.add_argument('--eps', type=float, default=0.1, 
+    parser.add_argument('--eps', type=float, default=0.8, 
                     help="The maximum distance between two samples for them to be considered as part of the same cluster in DBSCAN.")
     parser.add_argument('--min_samples', type=int, default=3, 
                     help="The minimum number of points required to form a dense region (cluster) in DBSCAN.")
-
+    parser.add_argument('--dropout', type=float, default=0.2)
 
     args = parser.parse_args()
 
@@ -109,6 +109,7 @@ if __name__ == '__main__':
         'dataset': OmegaConf.to_container(mnmv2_config),
         'batch_size': unet_config.get('batch_size', 32),
         'unet': OmegaConf.to_container(unet_config),
+        'dropout': args.dropout,
         'trainer': OmegaConf.to_container(trainer_config),
 
         # [NEW] Pass new params into cfg
@@ -137,7 +138,7 @@ if __name__ == '__main__':
         
         now = datetime.now()
         filename = 'mnmv2-' + now.strftime("%H-%M_%d-%m-%Y")
-
+        print(filename)
         trainer = L.Trainer(
             limit_train_batches=trainer_config.limit_train_batches,
             max_epochs=trainer_config.max_epochs,
@@ -167,6 +168,7 @@ if __name__ == '__main__':
                 out_channels=unet_config.out_channels,
                 channels=[unet_config.n_filters_init * 2 ** i for i in range(unet_config.depth)],
                 strides=[2] * (unet_config.depth - 1),
+                dropout=args.dropout,
                 num_res_units=4
             )
             
@@ -208,6 +210,7 @@ if __name__ == '__main__':
                 out_channels=model_config['unet']['out_channels'],
                 channels=[model_config['unet']['n_filters_init'] * 2 ** i for i in range(model_config['unet']['depth'])],
                 strides=[2] * (model_config['unet']['depth'] - 1),
+                dropout=args.dropout,
                 num_res_units=4
             )
 
@@ -218,6 +221,35 @@ if __name__ == '__main__':
 
     # Getting results BEFORE using CLUE
     datamodule.setup(stage='test')
+    test_loader = datamodule.test_dataloader()
+
+    # Filter out images with no segmentation mask from the test dataset
+    filtered_inputs = []
+    filtered_targets = []
+    filtered_weights = [] if hasattr(next(iter(test_loader)), 'weight') else None
+
+    for batch_idx, batch in enumerate(test_loader):
+        images, targets = batch['input'], batch['target']  # Assuming dataloader returns (images, targets)
+
+        for i in range(images.size(0)):
+            img = images[i]  # Get one image
+            target = targets[i]  # Get corresponding target (segmentation mask)
+
+            if target.sum() > 0:  # Check if the segmentation mask has no foreground
+                filtered_inputs.append(img.unsqueeze(0))
+                filtered_targets.append(target.unsqueeze(0))
+
+    # Combine filtered data back into tensors
+    if filtered_inputs is not None and filtered_targets is not None:
+        filtered_inputs = torch.cat(filtered_inputs, dim=0)
+        filtered_targets = torch.cat(filtered_targets, dim=0)
+    
+    filtered_data = MNMv2Subset(
+        input=filtered_inputs,
+        target=filtered_targets,
+    )
+
+    # datamodule.mnm_test = filtered_data
     model.eval()
     test_res = trainer.test(model, datamodule=datamodule)
 
@@ -280,6 +312,7 @@ if __name__ == '__main__':
 
     # Getting results AFTER using CLUE
     datamodule.setup(stage='test')
+    # datamodule.mnm_test = filtered_data
     model = model.to(device)
     model.eval()
     test_perf = trainer.test(model, datamodule=datamodule)[0]

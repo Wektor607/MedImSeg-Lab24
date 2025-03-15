@@ -28,7 +28,7 @@ from nnunet.paths import preprocessing_output_dir
 from nnunet.training.dataloading.dataset_loading import *
 
 # - local source
-from augment import RandAugmentWithLabels, _apply_op
+from data_utils.augment import RandAugmentWithLabels, _apply_op
 
 
 
@@ -247,7 +247,6 @@ class MNMv2Dataset(Dataset):
 
     def random_split(
         self,
-        split_ratio: float = 0.0,
         val_size: float = 0.2,
     ):
         class MNMv2Subset(Dataset):
@@ -270,38 +269,17 @@ class MNMv2Dataset(Dataset):
             
         indices = torch.randperm(len(self.input)).tolist()
 
-        if split_ratio > 0:
-            train_split_idx = int((1 - val_size) * len(self.input))
-            train1_split_idx = int(train_split_idx * split_ratio)
+        mnmv2_train = MNMv2Subset(
+            input=self.input[indices[int(val_size * len(self.input)):]],
+            target=self.target[indices[int(val_size * len(self.input)):]],
+        )
 
-            train1 = MNMv2Subset(
-                input=self.input[indices[:train1_split_idx]],
-                target=self.target[indices[:train1_split_idx]],
-            )
+        mnmv2_val = MNMv2Subset(
+            input=self.input[indices[:int(val_size * len(self.input))]],
+            target=self.target[indices[:int(val_size * len(self.input))]],
+        )
 
-            train2 = MNMv2Subset(
-                input=self.input[indices[train1_split_idx:train_split_idx]],
-                target=self.target[indices[train1_split_idx:train_split_idx]],
-            )
-
-            val = MNMv2Subset(
-                input=self.input[indices[train_split_idx:]],
-                target=self.target[indices[train_split_idx:]],
-            )
-
-            return train1, train2, val
-        else:
-            mnmv2_train = MNMv2Subset(
-                input=self.input[indices[int(val_size * len(self.input)):]],
-                target=self.target[indices[int(val_size * len(self.input)):]],
-            )
-
-            mnmv2_val = MNMv2Subset(
-                input=self.input[indices[:int(val_size * len(self.input))]],
-                target=self.target[indices[:int(val_size * len(self.input))]],
-            )
-
-            return mnmv2_train, mnmv2_val
+        return mnmv2_train, mnmv2_val
 
 
     def __len__(self):
