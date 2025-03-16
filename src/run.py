@@ -219,7 +219,14 @@ if __name__ == '__main__':
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
 
-    # Getting results BEFORE using CLUE
+    # # Getting results BEFORE using CLUE for train
+    # datamodule.setup(stage='fit')
+    # train_loader = datamodule.train_dataloader()
+    
+    # model.eval()
+    # train_res = model.test_model(train_loader, device)
+    # print(f"Train Dice Score and Loss: {train_res}")
+    # Getting results BEFORE using CLUE for test
     datamodule.setup(stage='test')
     test_loader = datamodule.test_dataloader()
 

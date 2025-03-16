@@ -8,9 +8,7 @@ from sklearn.cluster import KMeans, MiniBatchKMeans, DBSCAN
 from torch.utils.data import DataLoader, DistributedSampler
 
 from utils import SamplingStrategy, ActualSequentialSampler
-import matplotlib.pyplot as plt
-import seaborn as sns
-#  python3 run_exp.py --train False --num_clusters 10 --clue_softmax_t 0.1 --adapt_num_epochs 100 --device cuda:1 --uncertainty Distance --kernel_size 5 --stride 2 --target_size 4096
+
 class CLUESampling(SamplingStrategy):
     """
     Implements CLUE: Clustering via Uncertainty-weighted Embeddings for segmentation tasks.
@@ -107,8 +105,6 @@ class CLUESampling(SamplingStrategy):
         tgt_emb, tgt_pen_emb = self.get_embedding(self.model, data_loader, self.device, self.args, with_emb=True)
         tgt_pen_emb = tgt_pen_emb.cpu().numpy()
 
-        # TODO: Class with calculating uncertainty
-        # Conditionally compute sample_weights
         if self.uncertainty == 'Entropy':
             tgt_scores = nn.Softmax(dim=1)(tgt_emb / self.T)
             tgt_scores += 1e-8
@@ -151,14 +147,14 @@ class CLUESampling(SamplingStrategy):
             sorted_probs, _ = probs.sort(dim=1, descending=True)
             margin = sorted_probs[:, 0] - sorted_probs[:, 1]
             sample_weights = 1.0 - margin
-            # sample_weights = margin / margin.max() 
+
         elif self.uncertainty == 'Uniform':
             sample_weights = np.ones(tgt_emb.shape[0])
         else:
             predictions = torch.argmax(tgt_emb, dim=1)
 
             targets = torch.stack([self.dset[idx]['target'][0] for idx in idxs_unlabeled])
-            dice_scores = torch.tensor([self.compute_dice_score(predictions[i], targets[i]) for i in range(self.batch_size)])
+            dice_scores = torch.tensor([self.compute_dice_score(predictions[i], targets[i]) for i in range(len(idxs_unlabeled))])
             sample_weights = 1.0 - dice_scores
 
         # Normalize weights for visualization
@@ -167,10 +163,9 @@ class CLUESampling(SamplingStrategy):
         
 
         if self.uncertainty == 'Margin':
-            sample_weights = np.log1p(sample_weights) ** 2  # Сглаживание разности вероятностей
-        # elif self.uncertainty == 'Distance':
-        #     sample_weights = np.sqrt(sample_weights + 1e-5)  # Сглаживание пиков
-        #     sample_weights = np.log1p(sample_weights)  # Дальнейшее выравнивание
+            sample_weights = np.log1p(sample_weights) ** 2
+
+        sample_weights = sample_weights ** 2
 
         denom = np.max(sample_weights) - np.min(sample_weights)
         if denom > 1e-8:
@@ -193,22 +188,6 @@ class CLUESampling(SamplingStrategy):
         # plt.xticks(fontsize=15)
         # plt.savefig(f"./plots/weights_distribution_{self.uncertainty}.png", dpi=300, bbox_inches='tight')
 
-        # return 0
-        import matplotlib.pyplot as plt
-        from sklearn.decomposition import PCA
-
-        pca = PCA(n_components=2)
-        emb_2d = pca.fit_transform(tgt_pen_emb)
-
-        plt.scatter(emb_2d[:, 0], emb_2d[:, 1], alpha=0.5)
-        plt.title("Projection of tgt_pen_emb")
-        plt.savefig(f"./plots/tgt_pen_emb.png", dpi=300, bbox_inches='tight')
-        from scipy.spatial.distance import pdist
-
-        pairwise_dists = pdist(tgt_pen_emb, metric='euclidean')
-        print(f"Mean pairwise distance: {pairwise_dists.mean()}")
-        print(f"Median pairwise distance: {np.median(pairwise_dists)}")
-
         if self.clustering == 'KMeans':
             km = KMeans(n_clusters=n)
             km.fit(tgt_pen_emb, sample_weight=sample_weights)
@@ -226,12 +205,9 @@ class CLUESampling(SamplingStrategy):
 
                 unique_labels = set(labels) - {-1}
                 epsi += 10                
-                print(unique_labels)
             
             while len(unique_labels) > n:
                 unique_labels.remove(random.choice(list(unique_labels)))
-            
-            print(f"Method: {self.uncertainty}, Found clusters: {len(unique_labels)}")
             
             centroids = []
             for label in unique_labels:
@@ -241,7 +217,7 @@ class CLUESampling(SamplingStrategy):
                 closest_idx = np.argmin(np.linalg.norm(cluster_points - centroid_mean, axis=1))
                 centroids.append(cluster_points[closest_idx])
 
-            centroids = np.array(centroids)
+            centroids = np.array(centroids)        
 
         indices = np.arange(tgt_pen_emb.shape[0])
         q_idxs = []
@@ -261,4 +237,33 @@ class CLUESampling(SamplingStrategy):
 
         image_idxs = self.image_to_embedding_idx[q_idxs]
         image_idxs = list(set(image_idxs))
+
         return idxs_unlabeled[image_idxs]
+
+
+
+# import os
+# import matplotlib.pyplot as plt
+# from sklearn.decomposition import PCA
+# os.makedirs("./plots/centroids", exist_ok=True)
+
+# pca = PCA(n_components=2)
+# emb_2d = pca.fit_transform(tgt_pen_emb)
+
+# centroids_2d = pca.transform(centroids)
+
+# plt.figure(figsize=(8, 6))
+# plt.scatter(emb_2d[:, 0], emb_2d[:, 1], alpha=0.5, label="Embeddings", color='blue')
+# plt.scatter(centroids_2d[:, 0], centroids_2d[:, 1], marker='x', color='red', s=100, label="Centroids")
+
+# plt.title(f"Centroids Visualization ({self.clustering}, {self.uncertainty})")
+# plt.xlabel("PCA Component 1")
+# plt.ylabel("PCA Component 2")
+# plt.legend()
+# plt.grid(True)
+
+# filename = f"./plots/centroids/{self.clustering}_{self.uncertainty}.png"
+# plt.savefig(filename, dpi=300, bbox_inches='tight')
+# plt.close()
+
+# print(f"Centroid visualization saved: {filename}")

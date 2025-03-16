@@ -60,6 +60,32 @@ def set_seed(seed: int = 42):
 
 torch.set_num_threads(1)
 
+from scipy.spatial.distance import pdist, squareform
+
+def compute_centroid_distances(centroids_dict):
+    results = {}
+
+    intra_distances = {}
+    for method, centroids in centroids_dict.items():
+        if len(centroids) > 1:
+            dists = pdist(centroids, metric='euclidean')
+            intra_distances[method] = np.mean(dists)
+        else:
+            intra_distances[method] = np.nan  # Если только один центроид
+
+    inter_distances = {}
+    methods = list(centroids_dict.keys())
+    for i in range(len(methods)):
+        for j in range(i + 1, len(methods)):
+            method1, method2 = methods[i], methods[j]
+            dists = []
+            for c1 in centroids_dict[method1]:
+                for c2 in centroids_dict[method2]:
+                    dists.append(np.linalg.norm(c1 - c2))
+            inter_distances[(method1, method2)] = np.mean(dists)
+
+    return intra_distances, inter_distances
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Training or loading a model.")
     parser.add_argument('--train', type=str2bool, nargs='?', const=True, default=False, 
@@ -97,17 +123,15 @@ if __name__ == '__main__':
 
     best_perf = 0
     eps = 50
+    centroids_dict = dict()
     # Loop over i to select an increasing number of samples
-    for i in ['MutalInfo', 'Margin', 'Uniform']: # 'Distance', 'Entropy'
-        for seed in range(0, 5):
+    for i in ['GT_Weight', 'MutalInfo', 'Margin', 'Uniform', 'Distance', 'Entropy']: 
+        for seed in range(0, 1): 
             set_seed(seed)
         # for eps in np.arange(0.1, 0.3, 0.1):
             # if i == 'Entropy' and (seed == 1 or seed == 2 or seed == 3):
             #     continue
             for min_samples in range(4, 5, 1):
-                
-                # if eps == 0.1 and min_samples == 1:
-                #     continue
                 cfg = OmegaConf.create({
                     'unet_config': unet_config,
                     'binary_target': True if unet_config.out_channels == 1 else False,
@@ -254,6 +278,8 @@ if __name__ == '__main__':
                 print("Working Time: ", end - start)
                 print('HERE')
 
+                centroids_dict[i] = nearest_idx
+
                 selected_samples = [datamodule.mnm_test[idx] for idx in nearest_idx]
                 
                 if not selected_samples:
@@ -320,3 +346,7 @@ if __name__ == '__main__':
                 
                 with open("/home/mikhelson/MedImSeg-Lab24/results/german_exp/dbscan.txt", "a") as f:
                     f.write(f"{i}\t{test_perf['test_loss']:.4f}\t{test_perf['test_dsc']:.4f}\t{end - start:.4f}\t{seed}\n") #\t{trainer.current_epoch:.4f}\t{end - start:.4f}\n")
+    intra_distances, inter_distances = compute_centroid_distances(centroids_dict)
+
+    print(intra_distances)
+    print(inter_distances)
