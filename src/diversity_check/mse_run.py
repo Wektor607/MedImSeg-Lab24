@@ -21,6 +21,17 @@ from torch.utils.data import Dataset
 
 # calculates MSE between centroids
 
+def compute_mse_between_centroids(centroids):
+    """
+    Compute the Mean Squared Error (MSE) between distances of cluster centroids.
+    """
+    if centroids is None or len(centroids) < 2:
+        return 0.0  # Set MSE to 0 when there are fewer than 2 centroids
+    
+    centroid_distances = np.linalg.norm(centroids[:, None, :] - centroids[None, :, :], axis=-1)
+    mse = mean_squared_error(centroid_distances.flatten(), np.zeros_like(centroid_distances.flatten()))
+    return mse
+
 class MNMv2Subset(Dataset):
     def __init__(
         self,
@@ -237,14 +248,19 @@ if __name__ == '__main__':
 
         # Calculate MSE between centroids and selected samples
         mse_values = []
-        for sample in selected_samples:
-            mse = mean_squared_error(centroids.cpu().numpy().flatten(), sample["input"].cpu().numpy().flatten())
+        # for sample in selected_samples:
+        #     mse = mean_squared_error(centroids.cpu().numpy().flatten(), sample["input"].cpu().numpy().flatten())
+        #     mse_values.append(mse)
+
+        # avg_mse = np.mean(mse_values)
+        if i==1:
+            mse_values.append(0)
+        else:
+            mse = compute_mse_between_centroids(centroids)
             mse_values.append(mse)
 
-        avg_mse = np.mean(mse_values)
-
         # Save MSE to file
-        mse_file_path = "/home/chopra/lab-git/MedImSeg-Lab24/results/MSE/mse_values.txt"
+        mse_file_path = "/home/chopra/lab-git/MedImSeg-Lab24/results/MSE/mse_values_centroids.txt"
         with open(mse_file_path, "a") as f:
             f.write(f"{i}\t{avg_mse:.4f}\n")
 
@@ -293,8 +309,8 @@ if __name__ == '__main__':
 
         # Write results to file
         if i == 1:
-            with open("/home/chopra/lab-git/MedImSeg-Lab24/results/MSE/results_test_32_100_1_25_uniform.txt", "w") as f:
+            with open("/home/chopra/lab-git/MedImSeg-Lab24/results/MSE/results_test_32_100_1_25_uniform_centroids.txt", "w") as f:
                 f.write(f"Num_Centroids\tLoss\tDice_Score\tMSE\tNum_epochs\tCentroid_time\n")    
         
-        with open("/home/chopra/lab-git/MedImSeg-Lab24/results/MSE/results_test_32_100_1_25_unifrom.txt", "a") as f:
+        with open("/home/chopra/lab-git/MedImSeg-Lab24/results/MSE/results_test_32_100_1_25_unifrom_centroids.txt", "a") as f:
             f.write(f"{i}\t{test_perf['test_loss']:.4f}\t{test_perf['test_dsc']:.4f}\t{avg_mse:.4f}\t{trainer.current_epoch:.4f}\t{end - start:.4f}\n")

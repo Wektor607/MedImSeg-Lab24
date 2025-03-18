@@ -24,15 +24,14 @@ class CLUESampling(SamplingStrategy):
         self.cluster_type = args.cluster_type
         self.T = args.clue_softmax_t
 
+        # Ensure idxs_lb exists to avoid AttributeError
+        self.idxs_lb = np.zeros(len(train_idx), dtype=bool)
+
         # [NEW] Retrieve new parameters from args
         self.use_uncertainty = args.use_uncertainty
         self.kernel_size = args.kernel_size
         self.stride = args.stride
         self.target_size = args.target_size  # <--- newly introduced parameter
-        # target_size = 1024 #32x32
-        # target_size = 256 #16x16
-        # target_size = 4096 #64x64
-        #target_size = 16384 #128x128
 
     def get_embedding(self, model, loader, device, args, with_emb=False):
         self.model.eval()
@@ -74,9 +73,14 @@ class CLUESampling(SamplingStrategy):
         embedding_pen = torch.cat(embedding_pen, dim=0)
         embedding = torch.cat(embedding, dim=0)
         return embedding, embedding_pen
-
+    
     def query(self, n):
-        idxs_unlabeled = np.arange(len(self.train_idx))[~self.idxs_lb]
+        """
+        Runs KMeans clustering and selects `n` most representative samples.
+        Stores the computed cluster centers for later retrieval.
+        """
+        idxs_unlabeled = np.where(~self.idxs_lb)[0]  # Get unlabeled indices
+
         if self.args.paral:
             train_sampler = DistributedSampler(ActualSequentialSampler(self.train_idx[idxs_unlabeled]))
         else:
@@ -103,14 +107,15 @@ class CLUESampling(SamplingStrategy):
         else:
             sample_weights = np.ones(tgt_pen_emb.shape[0])
 
-        km = KMeans(n)
-        km.fit(tgt_pen_emb, sample_weight=sample_weights)
+        # Run KMeans Clustering
+        self.km = KMeans(n_clusters=n, n_init=10)
+        self.km.fit(tgt_pen_emb, sample_weight=sample_weights)
 
         indices = np.arange(tgt_pen_emb.shape[0])
         q_idxs = []
         used_points = set()
 
-        for centroid in km.cluster_centers_:
+        for centroid in self.km.cluster_centers_:
             distances = np.linalg.norm(tgt_pen_emb[indices] - centroid, axis=1)
             sorted_indices = np.argsort(distances)
 
@@ -119,9 +124,15 @@ class CLUESampling(SamplingStrategy):
                 if min_index not in used_points:
                     q_idxs.append(min_index)
                     used_points.add(min_index)
-                    indices = np.delete(indices, min_dist_idx)
-                    break
+                    break  # Move to next centroid
 
         image_idxs = self.image_to_embedding_idx[q_idxs]
         image_idxs = list(set(image_idxs))
         return idxs_unlabeled[image_idxs]
+
+    def get_cluster_centers(self):
+        """Return the cluster centers from the most recent clustering operation."""
+        if hasattr(self, 'km') and self.km is not None:
+            return self.km.cluster_centers_
+        else:
+            raise AttributeError("KMeans clustering has not been run yet. Call `query(n)` first.")
